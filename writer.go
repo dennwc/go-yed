@@ -8,23 +8,18 @@ import (
 	"io"
 )
 
-type ID int
-
-func NewWriter(w io.Writer) *Writer {
-	return &Writer{w: w}
+func newWriter(w io.Writer) *writer {
+	return &writer{w: w}
 }
 
-type Writer struct {
+type writer struct {
 	w      io.Writer
 	err    error
 	header bool
 	footer bool
-
-	lastNode ID
-	lastEdge ID
 }
 
-func (w *Writer) writeString(s string) error {
+func (w *writer) writeString(s string) error {
 	if w.err != nil {
 		return w.err
 	}
@@ -35,7 +30,7 @@ func (w *Writer) writeString(s string) error {
 	return err
 }
 
-func (w *Writer) printf(format string, args ...interface{}) error {
+func (w *writer) printf(format string, args ...interface{}) error {
 	if w.err != nil {
 		return w.err
 	}
@@ -46,7 +41,7 @@ func (w *Writer) printf(format string, args ...interface{}) error {
 	return err
 }
 
-func (w *Writer) writeHeader() error {
+func (w *writer) writeHeader() error {
 	if w.footer {
 		return errors.New("yed: writer is closed")
 	} else if w.header {
@@ -65,45 +60,84 @@ func escape(s string) string {
 	return buf.String()
 }
 
-type Node struct {
-	Label       string
-	Description string
-
-	Style *NodeStyle
-}
-
-func (w *Writer) WriteNode(n Node) (ID, error) {
-	id := w.lastNode
-	w.lastNode++
-	if err := w.WriteNodeWithID(id, n); err != nil {
-		return 0, err
-	}
-	return id, nil
-}
-
-func (w *Writer) WriteNodeWithID(id ID, n Node) error {
+func (w *writer) WriteGraph(g *Graph) error {
 	if err := w.writeHeader(); err != nil {
 		return err
 	}
-	_ = w.printf("\n\t<node id=\"n%d\">", id)
+	id := g.ID()
+	if id == "" {
+		id = "G"
+	}
+	_ = w.printf(`
+  <graph edgedefault="directed" id="%s">
+    <data key="d0"/>`, id)
+	for _, n := range g.sub {
+		if err := w.writeNode(n); err != nil {
+			return err
+		}
+	}
+	return w.writeString(`
+  </graph>`)
+}
+
+func (w *writer) writeNode(n *Node) error {
+	if n.sub != nil {
+		_ = w.printf("\n\t<node id=\"%s\" yfiles.foldertype=\"group\">", n.ID())
+		if err := w.writeDescription(n.Description); err != nil {
+			return err
+		}
+		_ = w.printf(`
+      <data key="d6">
+        <y:ProxyAutoBoundsNode>
+          <y:Realizers active="0">
+            <y:GroupNode>
+              <y:Geometry height="181.87067499999998" width="294.52628859375017" x="186.07787140624984" y="135.68900499999998"/>
+              <y:Fill color="#F5F5F5" transparent="false"/>
+              <y:BorderStyle color="#000000" type="dashed" width="1.0"/>
+              <y:NodeLabel alignment="right" autoSizePolicy="node_width" backgroundColor="#EBEBEB" borderDistance="0.0" fontFamily="Dialog" fontSize="15" fontStyle="plain" hasLineColor="false" height="21.4609375" horizontalTextPosition="center" iconTextGap="4" modelName="internal" modelPosition="t" textColor="#000000" verticalTextPosition="bottom" visible="true" width="294.52628859375017" x="0.0" xml:space="preserve" y="0.0">%s</y:NodeLabel>
+              <y:Shape type="roundrectangle"/>
+              <y:State closed="false" closedHeight="50.0" closedWidth="50.0" innerGraphDisplayEnabled="false"/>
+              <y:NodeBounds considerNodeLabelSize="true"/>
+              <y:Insets bottom="15" bottomF="15.0" left="15" leftF="15.0" right="15" rightF="15.0" top="15" topF="15.0"/>
+              <y:BorderInsets bottom="5" bottomF="5.1200000000000045" left="7" leftF="7.15380859375" right="7" rightF="7.040000000000134" top="0" topF="0.0"/>
+            </y:GroupNode>
+            <y:GroupNode>
+              <y:Geometry height="50.0" width="50.0" x="0.0" y="60.0"/>
+              <y:Fill color="#F5F5F5" transparent="false"/>
+              <y:BorderStyle color="#000000" type="dashed" width="1.0"/>
+              <y:NodeLabel alignment="right" autoSizePolicy="node_width" backgroundColor="#EBEBEB" borderDistance="0.0" fontFamily="Dialog" fontSize="15" fontStyle="plain" hasLineColor="false" height="21.4609375" horizontalTextPosition="center" iconTextGap="4" modelName="internal" modelPosition="t" textColor="#000000" verticalTextPosition="bottom" visible="true" width="64.3076171875" x="-7.15380859375" xml:space="preserve" y="0.0">%s</y:NodeLabel>
+              <y:Shape type="roundrectangle"/>
+              <y:State closed="true" closedHeight="50.0" closedWidth="50.0" innerGraphDisplayEnabled="false"/>
+              <y:Insets bottom="5" bottomF="5.0" left="5" leftF="5.0" right="5" rightF="5.0" top="5" topF="5.0"/>
+              <y:BorderInsets bottom="0" bottomF="0.0" left="0" leftF="0.0" right="0" rightF="0.0" top="0" topF="0.0"/>
+            </y:GroupNode>
+          </y:Realizers>
+        </y:ProxyAutoBoundsNode>
+      </data>`, escape(n.Label), escape(n.Label))
+		if err := w.WriteGraph(n.sub); err != nil {
+			return err
+		}
+		return w.writeString("\n\t</node>")
+
+	}
+	_ = w.printf("\n\t<node id=\"%s\">", n.ID())
 	if err := w.writeDescription(n.Description); err != nil {
 		return err
 	}
 	if err := w.writeNodeGraphics(n.Label, n.Style); err != nil {
 		return err
 	}
-	_ = w.writeString("\n\t</node>")
-	return w.err
+	return w.writeString("\n\t</node>")
 }
 
-func (w *Writer) writeDescription(desc string) error {
+func (w *writer) writeDescription(desc string) error {
 	if desc == "" {
 		return w.writeString("\n\t\t<data key=\"d5\"/>")
 	}
 	return w.printf("\n\t\t<data key=\"d5\" xml:space=\"preserve\">%s</data>", escape(desc))
 }
 
-func (w *Writer) writeNodeGraphics(label string, s *NodeStyle) error {
+func (w *writer) writeNodeGraphics(label string, s *NodeStyle) error {
 	if s == nil {
 		s = &defaultNodeStyle
 	} else {
@@ -130,24 +164,9 @@ func (w *Writer) writeNodeGraphics(label string, s *NodeStyle) error {
 	return w.err
 }
 
-type Edge struct {
-	Label       string
-	Description string
-
-	Style *EdgeStyle
-}
-
-func (w *Writer) WriteEdge(from, to ID, e *Edge) error {
-	if err := w.writeHeader(); err != nil {
-		return err
-	}
-	if e == nil {
-		e = &Edge{}
-	}
-	id := w.lastEdge
-	w.lastEdge++
-
-	_ = w.printf("\n\t<edge id=\"e%d\" source=\"n%d\" target=\"n%d\">", id, from, to)
+func (w *writer) WriteEdge(e *Edge) error {
+	_ = w.printf("\n\t<edge id=\"%s\" source=\"%s\" target=\"%s\">",
+		e.ID(), e.Source().ID(), e.Target().ID())
 	if err := w.writeDescription(e.Description); err != nil {
 		return err
 	}
@@ -158,7 +177,7 @@ func (w *Writer) WriteEdge(from, to ID, e *Edge) error {
 	return w.err
 }
 
-func (w *Writer) writeEdgeGraphics(label string, s *EdgeStyle) error {
+func (w *writer) writeEdgeGraphics(label string, s *EdgeStyle) error {
 	if s == nil {
 		s = &defaultEdgeStyle
 	} else {
@@ -185,7 +204,7 @@ func (w *Writer) writeEdgeGraphics(label string, s *EdgeStyle) error {
 	return w.err
 }
 
-func (w *Writer) Close() error {
+func (w *writer) Close() error {
 	if w.footer {
 		return nil
 	}
@@ -210,12 +229,9 @@ const header = `<?xml version="1.0" encoding="UTF-8" standalone="no"?>
   <key attr.name="url" attr.type="string" for="edge" id="d8"/>
   <key attr.name="description" attr.type="string" for="edge" id="d9"/>
   <key for="edge" id="d10" yfiles.type="edgegraphics"/>
-  <graph edgedefault="directed" id="G">
-    <data key="d0"/>
 `
 
 const footer = `
-  </graph>
   <data key="d7">
     <y:Resources/>
   </data>
